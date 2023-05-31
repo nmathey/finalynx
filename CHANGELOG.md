@@ -2,6 +2,21 @@
 
 <!--next-version-placeholder-->
 
+## v1.18.1 (2023-05-31)
+### Fix
+
+* **fetch:** Skip malformed realt lines for now ([`3b55c43`](https://github.com/MadeInPierre/finalynx/commit/3b55c4305d2eab2c1c8a7f862be05da4a8426eeb))
+
+## v1.18.0 (2023-05-31)
+### Feature
+
+* **fetch:** Add new RealT fetch source ([#106](https://github.com/MadeInPierre/finalynx/issues/106)) ([`ca00549`](https://github.com/MadeInPierre/finalynx/commit/ca0054980026980368da1addbc05f2e6dc5f6b4a))
+
+## v1.17.0 (2023-05-30)
+### Feature
+
+* **console:** Add support for light/dark/custom console themes ([#115](https://github.com/MadeInPierre/finalynx/issues/115)) ([`7722e29`](https://github.com/MadeInPierre/finalynx/commit/7722e296ec0f869469ca39e97848b88d426d941c))
+
 ## v1.16.3 (2023-05-27)
 ### Fix
 * **delta:** Align deltas when showing portfolio root ([`cb20954`](https://github.com/MadeInPierre/finalynx/commit/cb20954e2b6dfaea56c31394f58f4f977c647109))
