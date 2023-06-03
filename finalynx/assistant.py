@@ -1,8 +1,11 @@
 import json
 import os
 from datetime import date
+from typing import Any
+from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Tuple
 from typing import TYPE_CHECKING
 
 import finalynx.theme
@@ -20,12 +23,15 @@ from finalynx.portfolio.envelope import Envelope
 from finalynx.portfolio.folder import Folder
 from finalynx.portfolio.folder import FolderDisplay
 from finalynx.portfolio.folder import SharedFolder
+from finalynx.portfolio.node import Node
 from finalynx.portfolio.targets import Target
+from html2image import Html2Image
 from rich import inspect  # noqa F401
 from rich import pretty
 from rich import print  # noqa F401
 from rich import traceback
 from rich.columns import Columns
+from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.tree import Tree
@@ -199,14 +205,14 @@ class Assistant:
         # Final set of results to be displayed
         panels: List[ConsoleRenderable] = [
             Panel(
-                self.render_envelopes(),
-                title="Delta Investments",
+                self._render_recommendations(),
+                title="Recommendations",
                 padding=(1, 2),
                 expand=False,
                 border_style=TH().PANEL,
             ),
             Panel(
-                self.render_perf(),
+                self._render_perf(),
                 title="Performance",
                 padding=(1, 2),
                 expand=False,
@@ -220,7 +226,7 @@ class Assistant:
 
         # Save the current portfolio to a file. Useful for statistics later
         if self.enable_export:
-            self.export(self.export_dir)
+            self.export_json(self.export_dir)
 
         # Display the entire portfolio and associated recommendations
         console.print(
@@ -236,7 +242,7 @@ class Assistant:
             console.log("Launching dashboard.")
             Dashboard(hide_amounts=self.hide_amounts).run(portfolio=self.portfolio)
 
-    def render_perf(self) -> Tree:
+    def _render_perf(self) -> Tree:
         """Print the current and ideal global expected performance."""
         perf = self.portfolio.get_perf(ideal=False).expected
         perf_ideal = self.portfolio.get_perf(ideal=True).expected
@@ -246,52 +252,77 @@ class Assistant:
         tree.add(f"[{TH().TEXT}]Planned:  [bold][{TH().ACCENT}]{perf_ideal:.1f} %[/] / year")
         return tree
 
-    def render_envelopes(self) -> Tree:
-        """Sort lines with non-zero deltas by envelopes and display them as
-        a summary of transfers to make."""
-        tree = Tree("Envelopes", hide_root=True, guide_style=TH().TREE_BRANCH)
+    def _render_recommendations(self) -> Tree:
+        """Sort lines with non-zero deltas by envelopes and display them as a summary of transfers to make."""
+        dict_recommendations: Dict[str, Any] = {}
 
-        for env in self.envelopes:
-            children, env_delta = [], 0.0
-            for line in env.lines:
-                delta = line.get_delta()
-                if delta != 0 and line.target.check() not in [
-                    Target.RESULT_NONE,
-                    Target.RESULT_OK,
-                    Target.RESULT_TOLERATED,
-                ]:
-                    env_delta += delta
-                    children.append(f"[{TH().TEXT}]" + line._render_delta(children=env.lines) + line._render_name())  # type: ignore
-
-            if children:
-                env_delta = round(env_delta)
-                render_delta = f"[{TH().DELTA_POS if env_delta > 0 else TH().DELTA_NEG}]{'+' if env_delta > 0 else ''}{env_delta} {DEFAULT_CURRENCY}"
-                node = tree.add(f"{render_delta} [{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{env.name}[/]")
-                for child in children:
-                    node.add(child)
-                node.children[-1].label += "\n"  # type: ignore
-
+        # Find all folders with non-zero deltas and non-zero amounts (to avoid empty shared folders)
         def _get_folders(node: Folder) -> List[Folder]:
             found: List[Folder] = []
             for child in node.children:
-                if isinstance(child, Folder):
-                    if isinstance(child, SharedFolder):
+                if isinstance(child, SharedFolder):
+                    if child.get_amount() > 0:
                         found.append(child)
-                    elif child.display == FolderDisplay.EXPANDED:
+                elif isinstance(child, Folder):
+                    if child.display == FolderDisplay.EXPANDED:
                         found += _get_folders(child)
                     else:
                         found.append(child)
             return found
 
-        folders = _get_folders(self.portfolio)
-        if folders:
-            node = tree.add(f"[{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]Folders")
-            for f in folders:
-                if f.get_delta() != 0:
-                    node.add(f"[{TH().TEXT}]" + f._render_delta(children=folders) + f._render_name())  # type: ignore
+        # Check if a folder has non-zero deltas to be displayed in the recommendations
+        def _check_node(node: Node) -> bool:
+            return node.get_delta() != 0 and node.target.check() not in [
+                Target.RESULT_NONE,
+                Target.RESULT_OK,
+                Target.RESULT_TOLERATED,
+            ]
+
+        # For each envelope, find all lines with non-zero deltas
+        for envelope in self.envelopes:
+            lines = [line for line in envelope.lines if _check_node(line)]
+            env_delta = round(sum([line.get_delta() for line in lines]))
+
+            # Only add the envelope if it has lines with non-zero deltas
+            if lines:
+                # Render the envelope name
+                render_delta = (
+                    f"[{TH().DELTA_POS if env_delta > 0 else TH().DELTA_NEG}]"
+                    f"{'+' if env_delta > 0 else ''}{env_delta} {DEFAULT_CURRENCY}"
+                )
+                render_envelope = f"{render_delta} [{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{envelope.name}[/]"
+
+                # Render the lines with non-zero deltas
+                dict_recommendations[render_envelope] = [
+                    f"[{TH().TEXT}]{line._render_delta(children=lines)}{line._render_name()}"  # type: ignore
+                    for line in lines
+                ]
+
+        # Render folders with non-zero deltas
+        if folders := [f for f in _get_folders(self.portfolio) if _check_node(f)]:
+            dict_recommendations[f"[{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]Folders"] = [
+                f"[{TH().TEXT}]{f._render_delta(children=folders)}{f._render_name()}" for f in folders  # type: ignore
+            ]
+
+        # Render the tree with folders containing lines with non-zero deltas
+        tree = Tree("Envelopes", hide_root=True, guide_style=TH().TREE_BRANCH)
+        for i_env, envelope_name in enumerate(dict_recommendations):
+            node = tree.add(envelope_name)
+            for i_line, r in enumerate(dict_recommendations[envelope_name]):
+                newline = (
+                    "\n"
+                    if i_line == len(dict_recommendations[envelope_name]) - 1
+                    and i_env < len(dict_recommendations.keys()) - 1
+                    else ""
+                )
+                node.add(r + newline)
+
+        # If no envelopes are displayed, show a nice message instead
+        if not tree.children:
+            tree.add("You're on track! 🎉")
         return tree
 
-    def export(self, dirpath: str) -> None:
+    def export_json(self, dirpath: str) -> None:
         """Save everything in a JSON file. Can be used for data analysis in future
         or by other projects.
         :param dirpath: Path to the directory where the file will be saved.
@@ -311,10 +342,42 @@ class Assistant:
                 f.write(json.dumps(final_dict, indent=4))
             console.log(f"Saved current portfolio to '{full_path}'")
         except FileNotFoundError:
-            console.log(
-                """[red][bold]Error:[/] Can't find the folder to save the portfolio to JSON. Three options:
-1. Disable export using --no-export
-2. Create a folder called logs/ in this folder (default folder)
-3. Set your own export directory using --export-dir=your/path/to/dir/
-            """
-            )
+            console.log("[red][bold]Error:[/] Can't find the folder to save the portfolio to JSON. Three options:")
+            console.log("[red]  1. Disable export using --no-export")
+            console.log("[red]  2. Create a folder called logs/ in this folder (default folder)")
+            console.log("[red]  3. Set your own export directory using --export-dir=your/path/to/dir/")
+
+    def export_img(
+        self,
+        dir_path: str = "",
+        file_name: str = "portfolio.png",
+        size: Tuple[int, int] = (1300, 2300),
+        zoom: float = 2,
+    ) -> str:
+        """Export your portfolio to a PNG file with the following options:
+        :param dir_path: Relative path to the directory that will contain the
+        :param file_name: File name without the path, must end with .png
+        :param size: Output image resolution.
+        :param zoom: Image zoom, only way to affect the DPI of the image.
+        :returns: The full absolute path where the image was saved.
+        """
+        # Create the directory if it does not exist
+        full_path = os.path.join(os.getcwd(), dir_path)
+        os.makedirs(full_path, exist_ok=True)
+
+        # Temporarily change the current theme to the web theme
+        previous_theme = TH()
+        set_active_theme(finalynx.theme.DashboardTheme())
+
+        # Export the entire portfolio tree to HTML and set the zoom
+        dashboard_console = Console(record=True, file=open(os.devnull, "w"))
+        dashboard_console.print(self.portfolio.tree(output_format="[dashboard_console]", hide_root=False))
+        output_html = dashboard_console.export_html().replace("body {", f"body {{\n    zoom: {zoom};")
+
+        # Convert the HTML to PNG
+        Html2Image(output_path=full_path).screenshot(html_str=output_html, save_as=file_name, size=size)
+
+        # Restore theme and return the image path
+        set_active_theme(previous_theme)
+        console.print(f"Saved portfolio PNG to '{full_path + file_name}'")
+        return full_path + file_name

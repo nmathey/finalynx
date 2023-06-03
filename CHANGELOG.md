@@ -2,6 +2,29 @@
 
 <!--next-version-placeholder-->
 
+## v1.19.1 (2023-06-03)
+
+### Fix
+
+* **target:** More intuitive displayed node ratio ([`20da9c8`](https://github.com/MadeInPierre/finalynx/commit/20da9c892d96c4cf7f165c306d1778e1c448c4c5))
+
+## v1.19.0 (2023-06-02)
+
+### Feature
+
+* **export:** Export the portfolio tree to PNG ([`f35606a`](https://github.com/MadeInPierre/finalynx/commit/f35606aa7a38c9d849b02c160b608f46a89a361c))
+
+## v1.18.4 (2023-06-02)
+
+### Fix
+
+* **portfolio:** Folder attributes weren't propagating to all successors ([`4a0cbf3`](https://github.com/MadeInPierre/finalynx/commit/4a0cbf3a6dfbe3a862a0eba3a92c3c300a939f0b))
+
+## v1.18.3 (2023-06-01)
+### Fix
+
+* **recommendations:** Redo delta render rules ([`d0fe97c`](https://github.com/MadeInPierre/finalynx/commit/d0fe97c62cfc910102054a42366fbc8f58848d33))
+
 ## v1.18.2 (2023-05-31)
 ### Fix
 

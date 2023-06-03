@@ -73,18 +73,13 @@ class Folder(Node):
         :param perf: Useful shortcut to set all chidlren's performance at once. Children keep priority
         over this shortcut.
         """
-        super().__init__(name, parent, target, newline)
+        super().__init__(name, asset_class, asset_subclass, parent, target, newline, perf, currency, envelope)
         self.children = [] if children is None else children
         self.display = display
-        self.asset_class = asset_class
-        self.asset_subclass = asset_subclass
-        self.perf = perf
-        self.currency = currency
-        self.envelope = envelope
 
+        # Set attributes related to all children
         for child in self.children:
             child.set_parent(self)
-
             self.set_child_attribs(
                 child,
                 self.asset_class,
@@ -130,7 +125,7 @@ class Folder(Node):
         expected performance."""
 
         # Get children's performances
-        children = [c for c in self.children if not (isinstance(c, Line) and c.perf.skip)]
+        children = [c for c in self.children if not (isinstance(c, Line) and c.perf.skip)]  # type: ignore
         perfs = [c.get_perf(ideal) if isinstance(c, Folder) else c.get_perf() for c in children]
 
         # If this folder is empty or all children want to be skipped, mark self as skipped
@@ -248,19 +243,18 @@ class Folder(Node):
     ) -> None:
         """Used by Folders to set attributes once in the Folder instead of setting it in each child.
         Called at initialization time and when a child is manually added to the folder."""
-        if isinstance(child, Line):
-            child.asset_class = asset_class if child.asset_class == AssetClass.UNKNOWN else child.asset_class
-            child.asset_subclass = (
-                asset_subclass if child.asset_subclass == AssetSubclass.UNKNOWN else child.asset_subclass
-            )
-            child.perf = perf if perf and child.perf.expected == 0 else child.perf
-            child.currency = currency if currency else child.currency
-            child.envelope = envelope if envelope else child.envelope
-        elif isinstance(child, Folder):
+
+        child.asset_class = asset_class if child.asset_class == AssetClass.UNKNOWN else child.asset_class
+        child.asset_subclass = asset_subclass if child.asset_subclass == AssetSubclass.UNKNOWN else child.asset_subclass
+        child.currency = currency if currency else child.currency
+        child.envelope = envelope if envelope else child.envelope
+
+        if perf and (not child.perf or (child.perf and child.perf.expected == 0)):
+            child.perf = perf
+
+        if isinstance(child, Folder):
             for c in child.children:
                 child.set_child_attribs(c, asset_class, asset_subclass, perf, currency, envelope)
-        else:
-            raise ValueError("Unrecognized node type.")
 
     def _render_name_color(self) -> str:
         """Internal method that overrides the superclass' render method to display
@@ -289,6 +283,16 @@ class Folder(Node):
             return self.target.render_ideal()
         ideal = float(np.sum([c.get_ideal() for c in self.children]))
         return f"{round(ideal)} {self._render_currency()} " if ideal else ""
+
+    def _render_delta(self, align: bool = True, children: Optional[List["Node"]] = None) -> str:
+        """Creates a formatted rendering of the delta investment needed to reach the target.
+        :param align: Use the `children` parameter as a list of nodes to align all amounts vertically.
+        :param children: List of `Node` objects used for vertical alignemnt, defaults to this parent's children.
+        :returns: The rendered string.
+        """
+        if self.get_amount() == 0:
+            return ""
+        return super()._render_delta(align, children)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -334,14 +338,14 @@ class SharedFolder(Folder):
         newline: bool = False,
         display: FolderDisplay = FolderDisplay.EXPANDED,
     ):
-        super().__init__(name, asset_class, asset_subclass, parent, target, bucket.lines, newline=False, display=display)  # type: ignore # TODO couldn't fix the mypy error
+        super().__init__(name, asset_class, asset_subclass, parent, target, bucket.lines, newline=False, display=display)  # type: ignore
         self.target_amount = target_amount
         self.newline = newline
         self.bucket = bucket
 
     def process(self) -> None:
         super().process()  # Process children
-        self.children = self.bucket.use_amount(self.target_amount)  # type: ignore # TODO couldn't fix the mypy error
+        self.children = self.bucket.use_amount(self.target_amount)  # type: ignore
 
         for child in self.children:
             child.set_parent(self)
