@@ -69,10 +69,10 @@ class Node(Hierarchy, Render):
             "[text]": "[target_text][prehint] [name] [hint][newline]",
             "[console]": "[target][prehint] [account_code][name_color][name][/] [hint][newline]",
             "[console_ideal]": "[bold][ideal][/][account_code][name_color][name][/][newline]",
-            "[console_deltas]": "[delta][account_code][name_color][name][/][newline]",
+            "[console_delta]": "[delta][account_code][name_color][name][/][newline]",
             "[console_perf]": "[bold][perf][/][account_code][name_color][name][/][newline]",
-            "[console_targets]": "[bold][goal][/][account_code][name_color][name][/][newline]",
-            "[text_targets]": "[goal][name][newline]",
+            "[console_target]": "[bold][goal][/][account_code][name_color][name][/][newline]",
+            "[text_target]": "[goal][name][newline]",
             "[dashboard_tree]": "[amount] [currency] [name]",
             "[dashboard_console]": "[bold][target][/][bright_black][prehint][/] [name_color][name][/] [bright_black][hint][/][newline]",
             "[target]": "[[target_color]][target_text][/]",
@@ -138,11 +138,6 @@ class Node(Hierarchy, Render):
         render = self.render(output_format, **render_args)
         return _tree.add(render) if _tree else Tree(render, hide_root=hide_root)
 
-    def tree_delta(self, _tree: Optional[Tree] = None) -> Tree:
-        """Generates a tree with delta amounts to be invested to reach the ideal portfolio allocation."""
-        render = self._render_delta(align=False) + ("\n" if self.newline else "")
-        return _tree.add(render) if _tree else Tree(render, hide_root=True)
-
     def process(self) -> None:
         """Some `Node` or `Target` objects might need to process some data once the investment
         values have been fetched from Finary. Here, this method is left as esmpty but can be
@@ -205,7 +200,6 @@ class Node(Hierarchy, Render):
         return (
             f"[{TH().DELTA_POS if delta > 0 else TH().DELTA_NEG}]"
             f"{'+' if delta > 0 else '-'}{abs(delta):>{max_length}} {self._render_currency()}[/] "
-            # f"[dim white]→  {self.get_ideal():>{max_length}} {self._render_currency()}[/] "
         )
 
     def _render_perf(self) -> str:

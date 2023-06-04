@@ -78,20 +78,20 @@ class Assistant:
         hide_amounts: bool = False,
         hide_root: bool = False,
         show_data: bool = False,
-        hide_deltas: bool = False,
         launch_dashboard: bool = False,
         output_format: str = "[console]",
         enable_export: bool = True,
         export_dir: str = "logs",
         active_sources: Optional[List[str]] = None,
         theme: Optional[finalynx.theme.Theme] = None,
+        sidecars: Optional[List[str]] = None,
         ignore_argv: bool = False,
     ):
         self.portfolio = portfolio
         self.buckets = buckets if buckets else []
         self.envelopes = envelopes if envelopes else []
 
-        # Options that can either be set in the constructor or from the command line
+        # Options that can either be set in the constructor or from the command line options, type --help
         self.ignore_orphans = ignore_orphans
         self.clear_cache = clear_cache
         self.force_signin = force_signin
@@ -100,10 +100,10 @@ class Assistant:
         self.show_data = show_data
         self.launch_dashboard = launch_dashboard
         self.output_format = output_format
-        self.hide_deltas = hide_deltas
         self.enable_export = enable_export
         self.export_dir = export_dir
         self.active_sources = active_sources if active_sources else ["finary"]
+        self.sidecars = sidecars if sidecars else []
 
         # Set the global color theme if specified
         if theme:
@@ -117,7 +117,8 @@ class Assistant:
         self._fetch = Fetch(self.portfolio, self.clear_cache, self.ignore_orphans)
 
     def add_source(self, source: SourceBase) -> None:
-        """Register a custom source defined by you."""
+        """Register a source, either defined in your own config or from the available Finalynx sources
+        using `from finalynx.fetch.source_any import SourceAny`."""
         self._fetch.add_source(source)
 
     def _parse_args(self) -> None:
@@ -142,20 +143,22 @@ class Assistant:
             self.launch_dashboard = True
         if args["--format"]:
             self.output_format = args["--format"]
-        if args["deltas"]:
-            self.output_format = "[console_deltas]"
+        if args["--sidecar"]:
+            self.sidecars += list(args["--sidecar"])
+        if args["delta"]:
+            self.output_format = "[console_delta]"
+            self.sidecars.remove("[delta]") if "[delta]" in self.sidecars else None
         if args["perf"]:
             self.output_format = "[console_perf]"
+            self.sidecars.remove("[perf]") if "[perf]" in self.sidecars else None
         if args["ideal"]:
             self.output_format = "[console_ideal]"
-        if args["targets"]:
-            self.output_format = "[console_targets]"
-            self.hide_deltas = True
+            self.sidecars.remove("[ideal]") if "[ideal]" in self.sidecars else None
+        if args["target"]:
+            self.output_format = "[console_target]"
+            self.sidecars.remove("[target]") if "[target]" in self.sidecars else None
         if args["text"]:
             self.output_format = "[text]"
-            self.hide_deltas = True
-        if args["--hide-deltas"]:
-            self.hide_deltas = True
         if args["--no-export"]:
             self.enable_export = False
         if args["--export-dir"]:
@@ -169,11 +172,44 @@ class Assistant:
             set_active_theme(finalynx.theme.AVAILABLE_THEMES[theme_name]())
 
     def run(self) -> None:
-        """Main function to run once your configuration is fully defined.
+        """Main method to run (once your configuration is fully defined). This method orchestrates the call
+        to the other available methods in this class. This methods displays a nice default output.
 
-        This function will fetch the data from your Finary account, process the targets in the portfolio tree,
+        This method will fetch the data from your Finary account, process the targets in the portfolio tree,
         run your simulation, generate recommendations, and format the output nicely to the console.
         """
+
+        # Fetch from the online sources and process the portfolio
+        fetched_tree = self.initialize()
+
+        # Render the console elements
+        main_frame = self.render_mainframe()
+        panels = self.render_panels()
+
+        # Save the current portfolio to a file. Useful for statistics later
+        if self.enable_export:
+            self.export_json(self.export_dir)
+
+        # Show the data fetched from Finary if specified
+        if self.show_data:
+            console.print(Panel(fetched_tree, title="Fetched data"))
+
+        # Display the entire portfolio and associated recommendations
+        console.print(
+            "\n\n",
+            main_frame,
+            "\n\n",
+            panels,
+            "\n",
+        )
+
+        # Host a local webserver with the running dashboard
+        if self.launch_dashboard:
+            self.dashboard()
+
+    def initialize(self) -> Tree:
+        """Fetch investments online from all sources and process the portfolio internally.
+        Call this method first if you're not using run()."""
 
         # Add default sources based on user input
         if "finary" in self.active_sources:
@@ -185,9 +221,18 @@ class Assistant:
         # Mandatory step after fetching to process some targets and buckets
         self.portfolio.process()
 
+        # Validate processing results
+        for _ in [b for b in self.buckets if b.get_used_amount() != b.get_max_amount()]:
+            console.log("[yellow][bold]Warning:[/] Bucket's total amount was not fully used.")
+
+        return fetched_tree
+
+    def render_mainframe(self) -> Columns:
+        """Renders the main tree and sidecars together. Call either run() or initialize() first."""
+
         # Items to be rendered as a row
-        render = [
-            Text(" "),
+        main_frame = [
+            Text("   "),
             self.portfolio.tree(
                 output_format=self.output_format,
                 hide_root=self.hide_root,
@@ -196,23 +241,33 @@ class Assistant:
         ]
 
         # Display deltas only if not already printed in the main tree
-        if not self.hide_deltas and "delta" not in self.output_format:
-            tree_delta = self.portfolio.tree_delta()
-            if not self.hide_root and tree_delta.children:  # align deltas if root is shown
-                tree_delta.children[0].label = "\n" + str(tree_delta.children[0].label)
-            render.append(tree_delta)
+        main_frame.append(Text("     "))
+        for sidecar in self.sidecars:
+            if sidecar.count(",") > 2:
+                console.log(
+                    "[red]Error: invalid sidecar format, skipping. Use at most 2 ',' to define format, condition and/or title.",
+                    highlight=False,
+                )
+                continue
+            main_frame.append(self.portfolio.render_sidecar(*sidecar.split(","), hide_root=self.hide_root))  # type: ignore
+
+        return Columns(main_frame, padding=(0, 0))  # type: ignore
+
+    def render_panels(self) -> Columns:
+        """Renders the default set of panels used in the default console view when calling run()."""
 
         # Final set of results to be displayed
         panels: List[ConsoleRenderable] = [
+            Text(" "),
             Panel(
-                self._render_recommendations(),
+                self.render_recommendations(),
                 title="Recommendations",
                 padding=(1, 2),
                 expand=False,
                 border_style=TH().PANEL,
             ),
             Panel(
-                self._render_perf(),
+                self.render_performance_report(),
                 title="Performance",
                 padding=(1, 2),
                 expand=False,
@@ -220,30 +275,10 @@ class Assistant:
             ),
         ]
 
-        # Show the data fetched from Finary if specified
-        if self.show_data:
-            panels.append(Panel(fetched_tree, title="Fetched data"))
+        return Columns(panels, padding=(2, 2))
 
-        # Save the current portfolio to a file. Useful for statistics later
-        if self.enable_export:
-            self.export_json(self.export_dir)
-
-        # Display the entire portfolio and associated recommendations
-        console.print(
-            "\n\n",
-            Columns(render, padding=(2, 2)),  # type: ignore
-            "\n\n",
-            Columns(panels, padding=(2, 2)),
-            "\n",
-        )
-
-        # Host a local webserver with the running dashboard
-        if self.launch_dashboard:
-            console.log("Launching dashboard.")
-            Dashboard(hide_amounts=self.hide_amounts).run(portfolio=self.portfolio)
-
-    def _render_perf(self) -> Tree:
-        """Print the current and ideal global expected performance."""
+    def render_performance_report(self) -> Tree:
+        """Print the current and ideal global expected performance. Call either run() or initialize() first."""
         perf = self.portfolio.get_perf(ideal=False).expected
         perf_ideal = self.portfolio.get_perf(ideal=True).expected
 
@@ -252,8 +287,10 @@ class Assistant:
         tree.add(f"[{TH().TEXT}]Planned:  [bold][{TH().ACCENT}]{perf_ideal:.1f} %[/] / year")
         return tree
 
-    def _render_recommendations(self) -> Tree:
-        """Sort lines with non-zero deltas by envelopes and display them as a summary of transfers to make."""
+    def render_recommendations(self) -> Tree:
+        """Sort lines with non-zero deltas by envelopes and display them as a summary of transfers to make.
+        Call either run() or initialize() first.
+        """
         dict_recommendations: Dict[str, Any] = {}
 
         # Find all folders with non-zero deltas and non-zero amounts (to avoid empty shared folders)
@@ -278,31 +315,33 @@ class Assistant:
                 Target.RESULT_TOLERATED,
             ]
 
+        # Render each envelope of folder's parent with a custom style along with the
+        def _render_title(children: List[Any], name: str) -> str:
+            delta = round(sum([c.get_delta() for c in children]))
+            return (
+                f"[{TH().DELTA_POS if delta > 0 else TH().DELTA_NEG}]"
+                f"{'+' if delta > 0 else ''}{delta} {DEFAULT_CURRENCY}"
+                f" [{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{name}[/]"
+            )
+
         # For each envelope, find all lines with non-zero deltas
         for envelope in self.envelopes:
-            lines = [line for line in envelope.lines if _check_node(line)]
-            env_delta = round(sum([line.get_delta() for line in lines]))
-
             # Only add the envelope if it has lines with non-zero deltas
-            if lines:
-                # Render the envelope name
-                render_delta = (
-                    f"[{TH().DELTA_POS if env_delta > 0 else TH().DELTA_NEG}]"
-                    f"{'+' if env_delta > 0 else ''}{env_delta} {DEFAULT_CURRENCY}"
-                )
-                render_envelope = f"{render_delta} [{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{envelope.name}[/]"
-
-                # Render the lines with non-zero deltas
-                dict_recommendations[render_envelope] = [
+            if lines := [line for line in envelope.lines if _check_node(line)]:
+                dict_recommendations[_render_title(lines, envelope.name)] = [
                     f"[{TH().TEXT}]{line._render_delta(children=lines)}{line._render_name()}"  # type: ignore
                     for line in lines
                 ]
 
-        # Render folders with non-zero deltas
+        # Render folders with non-zero deltas, classify them by parent name
         if folders := [f for f in _get_folders(self.portfolio) if _check_node(f)]:
-            dict_recommendations[f"[{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]Folders"] = [
-                f"[{TH().TEXT}]{f._render_delta(children=folders)}{f._render_name()}" for f in folders  # type: ignore
-            ]
+            parent_names = {f.parent.name for f in folders if f.parent is not None}
+            for parent_name in parent_names:
+                children_folders = [f for f in folders if f.parent and f.parent.name == parent_name]
+                dict_recommendations[_render_title(children_folders, parent_name)] = [
+                    f"[{TH().TEXT}]{f._render_delta(children=children_folders)}{f._render_name()}"  # type: ignore
+                    for f in children_folders
+                ]
 
         # Render the tree with folders containing lines with non-zero deltas
         tree = Tree("Envelopes", hide_root=True, guide_style=TH().TREE_BRANCH)
@@ -321,6 +360,11 @@ class Assistant:
         if not tree.children:
             tree.add("You're on track! 🎉")
         return tree
+
+    def dashboard(self) -> None:
+        """Launch an interactive web dashboard! Call either run() or initialize() first."""
+        console.log("Launching dashboard.")
+        Dashboard(hide_amounts=self.hide_amounts).run(portfolio=self.portfolio)
 
     def export_json(self, dirpath: str) -> None:
         """Save everything in a JSON file. Can be used for data analysis in future
@@ -371,7 +415,8 @@ class Assistant:
 
         # Export the entire portfolio tree to HTML and set the zoom
         dashboard_console = Console(record=True, file=open(os.devnull, "w"))
-        dashboard_console.print(self.portfolio.tree(output_format="[dashboard_console]", hide_root=False))
+        dashboard_console.print(self.render_mainframe())
+        dashboard_console.print(self.render_panels())
         output_html = dashboard_console.export_html().replace("body {", f"body {{\n    zoom: {zoom};")
 
         # Convert the HTML to PNG

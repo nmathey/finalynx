@@ -170,12 +170,34 @@ class Folder(Node):
                 child.tree(output_format=output_format, _tree=node, **render_args)
         return node
 
-    # TODO convert this to show any customizable output_format?
-    def tree_delta(self, _tree: Optional[Tree] = None) -> Tree:
-        """Generates a tree with delta amounts to be invested to reach the ideal portfolio allocation."""
-        render = self._render_delta(align=False)
+    def render_sidecar(
+        self,
+        output_format: str = "[delta]",
+        condition_format: str = "",
+        title: Optional[str] = None,
+        hide_root: Optional[bool] = None,
+        _tree: Optional[Tree] = None,
+    ) -> Tree:
+        """Generates a vertical tree with the specified output format for each node.
+        :param output_format: The output format to be rendered for each node.
+        :param condition_format: Only show this node's `output_format` if the rendered
+        `condition_format` is not empty (useful to match multiple sidecars together).
+        :param title: Name of this sidecar, displayed only if root is not hidden.
+        :param hide_root: Need to specify if the main tree's root is hidden.
+        """
+
+        def _render_node(node: Node) -> str:
+            if not condition_format or node.render(condition_format).strip():
+                return node.render(output_format, align=False)  # type: ignore
+            return ""
 
         # Follow the same print policy as the main tree
+        render = _render_node(self)
+
+        # TODO nicer style maybe?
+        # if self.display == FolderDisplay.EXPANDED:
+        #     render = f"[{TH().FOLDER_STYLE}]{render}[/]"
+
         if self.display != FolderDisplay.EXPANDED and self.newline:
             render += "\n"
 
@@ -188,7 +210,16 @@ class Folder(Node):
         # Add children if they are displayed in the main tree as well
         if self.display == FolderDisplay.EXPANDED:
             for child in self.children:
-                child.tree_delta(_tree=_tree)
+                if isinstance(child, Folder):
+                    child.render_sidecar(output_format, condition_format, _tree=_tree)
+                else:
+                    _tree.add(_render_node(child) + ("\n" if child.newline else ""))
+
+        # Align deltas if root is shown (necessary hack for bugfix #105)
+        if hide_root is False and _tree.children:
+            title = title if title else output_format.replace("[", "").replace("]", "").upper()
+            _tree.children[0].label = f"[bold {TH().TEXT}]{title}[/]\n" + str(_tree.children[0].label)
+
         return _tree
 
     def process(self) -> None:
@@ -280,9 +311,9 @@ class Folder(Node):
         """:returns: A string representation of the ideal amount to be invested in
         this folder. If this folder has no target, use the sum of its children's ideals."""
         if self.target.check() != Target.RESULT_NONE:
-            return self.target.render_ideal()
+            return super()._render_ideal()
         ideal = float(np.sum([c.get_ideal() for c in self.children]))
-        return f"{round(ideal)} {self._render_currency()} " if ideal else ""
+        return f"[{TH().ACCENT}]{round(ideal)} {self._render_currency()}[/] " if ideal else ""
 
     def _render_delta(self, align: bool = True, children: Optional[List["Node"]] = None) -> str:
         """Creates a formatted rendering of the delta investment needed to reach the target.
