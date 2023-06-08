@@ -2,6 +2,29 @@
 
 <!--next-version-placeholder-->
 
+## v1.20.3 (2023-06-07)
+
+### Fix
+
+* Import error caused crash in v1.20.2 ([`bcd0171`](https://github.com/MadeInPierre/finalynx/commit/bcd01715929a2e28721339b4a41ea9b3574aa953))
+
+### Documentation
+
+* Write tutorial for targets, tweaks ([`3dd0883`](https://github.com/MadeInPierre/finalynx/commit/3dd08837c66d103301d16b9b26038a47f09a38c4))
+* Update readme tutorial links ([`c4beabf`](https://github.com/MadeInPierre/finalynx/commit/c4beabf6be961da5150170c544c39c983938ac92))
+
+## v1.20.2 (2023-06-06)
+
+### Fix
+
+* **sidecar:** Add option to hide renders for expanded folders ([`560d4fa`](https://github.com/MadeInPierre/finalynx/commit/560d4fac58b65e62eee5152c03ba66c73303f597))
+* **recommendations:** Sort by total delta ([`5e686ef`](https://github.com/MadeInPierre/finalynx/commit/5e686ef26417611f3cc309c9b71abe962f284d14))
+
+### Documentation
+
+* Fix screenshot url ([`4556af7`](https://github.com/MadeInPierre/finalynx/commit/4556af73af91be4af3515d31802e20bb59a45fcc))
+* Create tutorials ([`93780d2`](https://github.com/MadeInPierre/finalynx/commit/93780d28c3c81bcf54a0238219413733898d4c45))
+
 ## v1.20.1 (2023-06-04)
 
 ### Fix

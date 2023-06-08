@@ -23,6 +23,7 @@ from finalynx.portfolio.envelope import Envelope
 from finalynx.portfolio.folder import Folder
 from finalynx.portfolio.folder import FolderDisplay
 from finalynx.portfolio.folder import SharedFolder
+from finalynx.portfolio.folder import Sidecar
 from finalynx.portfolio.node import Node
 from finalynx.portfolio.targets import Target
 from html2image import Html2Image
@@ -84,7 +85,7 @@ class Assistant:
         export_dir: str = "logs",
         active_sources: Optional[List[str]] = None,
         theme: Optional[finalynx.theme.Theme] = None,
-        sidecars: Optional[List[str]] = None,
+        sidecars: Optional[List[Sidecar]] = None,
         ignore_argv: bool = False,
     ):
         self.portfolio = portfolio
@@ -144,19 +145,27 @@ class Assistant:
         if args["--format"]:
             self.output_format = args["--format"]
         if args["--sidecar"]:
-            self.sidecars += list(args["--sidecar"])
+            for sidecar in list(args["--sidecar"]):
+                if sidecar.count(",") > 3:
+                    console.log(
+                        "[red]Error: invalid sidecar format, skipping. Use at most 3 ',' to"
+                        " define format, condition, title and/or folder rendering.",
+                        highlight=False,
+                    )
+                    continue
+                self.sidecars.append(Sidecar(*sidecar.split(",")))
         if args["delta"]:
             self.output_format = "[console_delta]"
-            self.sidecars.remove("[delta]") if "[delta]" in self.sidecars else None
+            self.sidecars = [s for s in self.sidecars if s.output_format != "[delta]"]
         if args["perf"]:
             self.output_format = "[console_perf]"
-            self.sidecars.remove("[perf]") if "[perf]" in self.sidecars else None
+            self.sidecars = [s for s in self.sidecars if s.output_format != "[perf]"]
         if args["ideal"]:
             self.output_format = "[console_ideal]"
-            self.sidecars.remove("[ideal]") if "[ideal]" in self.sidecars else None
+            self.sidecars = [s for s in self.sidecars if s.output_format != "[ideal]"]
         if args["target"]:
             self.output_format = "[console_target]"
-            self.sidecars.remove("[target]") if "[target]" in self.sidecars else None
+            self.sidecars = [s for s in self.sidecars if s.output_format != "[target]"]
         if args["text"]:
             self.output_format = "[text]"
         if args["--no-export"]:
@@ -241,15 +250,7 @@ class Assistant:
         ]
 
         # Display deltas only if not already printed in the main tree
-        main_frame.append(Text("     "))
-        for sidecar in self.sidecars:
-            if sidecar.count(",") > 2:
-                console.log(
-                    "[red]Error: invalid sidecar format, skipping. Use at most 2 ',' to define format, condition and/or title.",
-                    highlight=False,
-                )
-                continue
-            main_frame.append(self.portfolio.render_sidecar(*sidecar.split(","), hide_root=self.hide_root))  # type: ignore
+        main_frame += [Text("     ")] + [self.portfolio.render_sidecar(s, self.hide_root) for s in self.sidecars]
 
         return Columns(main_frame, padding=(0, 0))  # type: ignore
 
@@ -291,7 +292,16 @@ class Assistant:
         """Sort lines with non-zero deltas by envelopes and display them as a summary of transfers to make.
         Call either run() or initialize() first.
         """
-        dict_recommendations: Dict[str, Any] = {}
+        dict_envs: Dict[str, Any] = {}
+
+        # Guide the user to set envelopes if not already done
+        if not self.envelopes:
+            return Tree(
+                f"[dim {TH().TEXT}]"
+                "To activate recommendations, set\n"
+                "envelopes to your lines and give\n"
+                "them to Assistant (tutorial #11)"
+            )
 
         # Find all folders with non-zero deltas and non-zero amounts (to avoid empty shared folders)
         def _get_folders(node: Folder) -> List[Folder]:
@@ -316,45 +326,36 @@ class Assistant:
             ]
 
         # Render each envelope of folder's parent with a custom style along with the
-        def _render_title(children: List[Any], name: str) -> str:
-            delta = round(sum([c.get_delta() for c in children]))
-            return (
-                f"[{TH().DELTA_POS if delta > 0 else TH().DELTA_NEG}]"
-                f"{'+' if delta > 0 else ''}{delta} {DEFAULT_CURRENCY}"
-                f" [{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{name}[/]"
+        def _render_title(children: List[Any], name: str) -> Tuple[int, str]:
+            total_delta = round(sum([c.get_delta() for c in children]))
+            return total_delta, (
+                f"[{TH().DELTA_POS if total_delta > 0 else TH().DELTA_NEG}]"
+                f"{'+' if total_delta > 0 else ''}{total_delta} {DEFAULT_CURRENCY} "
+                f"[{TH().FOLDER_COLOR} {TH().FOLDER_STYLE}]{name}[/]"
             )
 
         # For each envelope, find all lines with non-zero deltas
         for envelope in self.envelopes:
-            # Only add the envelope if it has lines with non-zero deltas
             if lines := [line for line in envelope.lines if _check_node(line)]:
-                dict_recommendations[_render_title(lines, envelope.name)] = [
-                    f"[{TH().TEXT}]{line._render_delta(children=lines)}{line._render_name()}"  # type: ignore
-                    for line in lines
-                ]
+                delta, title = _render_title(lines, envelope.name)
+                dict_envs[title] = (delta, lines)
 
         # Render folders with non-zero deltas, classify them by parent name
         if folders := [f for f in _get_folders(self.portfolio) if _check_node(f)]:
-            parent_names = {f.parent.name for f in folders if f.parent is not None}
-            for parent_name in parent_names:
-                children_folders = [f for f in folders if f.parent and f.parent.name == parent_name]
-                dict_recommendations[_render_title(children_folders, parent_name)] = [
-                    f"[{TH().TEXT}]{f._render_delta(children=children_folders)}{f._render_name()}"  # type: ignore
-                    for f in children_folders
-                ]
+            for parent_name in {f.parent.name for f in folders if f.parent}:
+                items = [f for f in folders if f.parent and f.parent.name == parent_name]
+                delta, title = _render_title(items, parent_name)
+                dict_envs[title] = (delta, items)
 
-        # Render the tree with folders containing lines with non-zero deltas
+        # Render the tree with folders containing lines with non-zero deltas (sorted by delta)
         tree = Tree("Envelopes", hide_root=True, guide_style=TH().TREE_BRANCH)
-        for i_env, envelope_name in enumerate(dict_recommendations):
+        dict_sorted = {k: v[1] for k, v in sorted(dict_envs.items(), key=lambda item: item[1][0])}  # type: ignore
+        for i_env, envelope_name in enumerate(dict_sorted):
             node = tree.add(envelope_name)
-            for i_line, r in enumerate(dict_recommendations[envelope_name]):
-                newline = (
-                    "\n"
-                    if i_line == len(dict_recommendations[envelope_name]) - 1
-                    and i_env < len(dict_recommendations.keys()) - 1
-                    else ""
-                )
-                node.add(r + newline)
+            for i_line, line in enumerate(dict_sorted[envelope_name]):
+                render = f"[{TH().TEXT}]{line._render_delta(children=dict_sorted[envelope_name])}{line._render_name()}"  # type: ignore
+                newline = bool(i_line == len(dict_sorted[envelope_name]) - 1 and i_env < len(dict_envs.keys()) - 1)
+                node.add(render + ("\n" if newline else ""))
 
         # If no envelopes are displayed, show a nice message instead
         if not tree.children:
