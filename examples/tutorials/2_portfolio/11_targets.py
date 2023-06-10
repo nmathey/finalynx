@@ -2,6 +2,7 @@
 Finalynx - Tutorial 10 - Set investment targets for your lines
 ==============================================================
 
+
 This tutorial shows how to define investment targets for your lines. For each node
 in the portfolio tree, you can set various types of targets to help you reach your
 investment goals. These targets include:
@@ -32,7 +33,7 @@ fake `amount` values are simply used to show a nice result if you run this code.
 
 
 portfolio = Portfolio(
-    "My Portfolio",  # Only used for display purposes
+    "My Portfolio",
     children=[
         # Notify me if this line goes above 500
         Line("Neobank", amount=400, target=TargetMax(500)),

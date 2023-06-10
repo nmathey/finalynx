@@ -2,9 +2,11 @@
 Finalynx - Tutorial 7 - Define your portfolio structure (basics)
 ================================================================
 
+
 This tutorial shows how to define your portfolio structure in your configuration
 file. This is the most important part of your configuration and lets you freely
 organize your investments in a tree structure.
+
 
 Try it out by running:
 > python3 examples/tutorials/7_structure.py
@@ -39,7 +41,7 @@ instead of a list of children. We'll see how to use them in the next tutorial.
 portfolio = Portfolio(
     "My Portfolio",  # Only used for display purposes
     currency="€",  # Set the default currency for all children
-    target=None,  # We'll see how to use targets later
+    target=None,  # We'll see how to use targets in a future tutorial
     children=[
         Folder(
             "My first folder",
